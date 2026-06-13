@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>강남구 우수관망 침수 시뮬레이터 · SWMM Web Demo</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121c2e; --panel2:#0e1626; --line:#23344e;
+    --text:#e6eefb; --muted:#8fa6c4; --accent:#37c0ff; --accent2:#6ee7b7;
+    --warn:#ffb454; --flood:#ff5470;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%, #16233b 0%, var(--bg) 55%);
+    color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",
+    "Apple SD Gothic Neo","Malgun Gothic",sans-serif; overflow:hidden;}
+  .wrap{display:flex; height:100vh; gap:14px; padding:14px}
+  .left{flex:1; display:flex; flex-direction:column; gap:12px; min-width:0}
+  .right{width:340px; display:flex; flex-direction:column; gap:12px; overflow:auto}
+  .card{background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);
+    border:1px solid var(--line); border-radius:14px; padding:14px}
+  h1{font-size:18px; margin:0; letter-spacing:.2px}
+  h1 small{display:block; font-size:12px; color:var(--muted); font-weight:400; margin-top:3px}
+  h2{font-size:12px; text-transform:uppercase; letter-spacing:1.4px; color:var(--muted); margin:0 0 10px}
+  #stage{flex:1; position:relative; padding:0; overflow:hidden}
+  canvas{display:block; width:100%; height:100%; border-radius:13px}
+  .row{display:flex; align-items:center; gap:10px; margin:9px 0}
+  .row label{font-size:12px; color:var(--muted); width:96px; flex:none}
+  input[type=range]{flex:1; accent-color:var(--accent)}
+  .val{font-variant-numeric:tabular-nums; font-size:13px; min-width:62px; text-align:right}
+  .btns{display:flex; gap:8px; flex-wrap:wrap}
+  button{cursor:pointer; border:1px solid var(--line); background:#15233a; color:var(--text);
+    padding:9px 12px; border-radius:10px; font-size:13px; transition:.12s; flex:1}
+  button:hover{border-color:var(--accent); background:#1b2c47}
+  button.primary{background:linear-gradient(180deg,#1f6feb,#1657c0); border-color:#2f7bf0}
+  button.warn{background:linear-gradient(180deg,#b5471f,#8f3414); border-color:#cf5a2c}
+  .presets button{flex:none; padding:7px 10px; font-size:12px}
+  .stat{display:flex; justify-content:space-between; align-items:baseline;
+    padding:7px 0; border-bottom:1px dashed var(--line)}
+  .stat:last-child{border-bottom:none}
+  .stat .k{font-size:12px; color:var(--muted)}
+  .stat .v{font-size:16px; font-variant-numeric:tabular-nums; font-weight:600}
+  .v.flood{color:var(--flood)} .v.ok{color:var(--accent2)}
+  .legend{display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--muted)}
+  .legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:5px; vertical-align:-1px}
+  canvas.mini{height:70px; border:1px solid var(--line); border-radius:8px; background:#0a1322; width:100%}
+  .foot{font-size:11px; color:var(--muted); line-height:1.5}
+  .pill{font-size:11px; color:var(--accent2); background:#0e2a22; border:1px solid #1c4a3a; border-radius:20px; padding:3px 9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="left">
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between">
+      <h1>서울 강남구 우수관망 침수 시뮬레이터
+        <small>EPA SWMM 동역학파 라우팅 · 강남역 저지대 → 한강·탄천 방류 · 약 <span id="nN">100</span>개 노드</small>
+      </h1>
+      <span id="clock" class="pill">00:00:00</span>
+    </div>
+    <div class="card" id="stage"><canvas id="net"></canvas></div>
+    <div class="card legend">
+      <span><i style="background:#2b6cff"></i>관거 여유</span>
+      <span><i style="background:#ffb454"></i>만관 임박</span>
+      <span><i style="background:#ff5470"></i>과부하·월류</span>
+      <span><i style="background:#1d3a6b"></i>하천(한강·탄천)</span>
+      <span><i style="background:#6ee7b7"></i>방류구</span>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="card">
+      <h2>강우 입력 (Rainfall)</h2>
+      <div class="row">
+        <label>강우강도</label>
+        <input id="rain" type="range" min="0" max="180" value="60" step="5">
+        <span class="val"><span id="rainV">60</span> mm/h</span>
+      </div>
+      <div class="presets btns">
+        <button data-rain="30">약한 비 30</button>
+        <button data-rain="70">호우 70</button>
+        <button data-rain="110">집중호우 110</button>
+        <button data-rain="160">극한강우 160</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label>재생 속도</label>
+        <input id="speed" type="range" min="1" max="20" value="8" step="1">
+        <span class="val"><span id="speedV">8</span>×</span>
+      </div>
+      <div class="btns" style="margin-top:6px">
+        <button id="play" class="primary">▶ 시작</button>
+        <button id="reset" class="warn">⟲ 초기화</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>시스템 상태 (Live)</h2>
+      <div class="stat"><span class="k">총 유입 (소유역 유출)</span><span class="v" id="sInflow">0.0</span></div>
+      <div class="stat"><span class="k">하천 방류량 합</span><span class="v" id="sOut">0.0</span></div>
+      <div class="stat"><span class="k">관망 내 저류량</span><span class="v" id="sStore">0.0</span></div>
+      <div class="stat"><span class="k">침수(월류) 노드</span><span class="v ok" id="sFloodN">0 개</span></div>
+      <div class="stat"><span class="k">누적 침수량</span><span class="v ok" id="sFloodV">0.0</span></div>
+      <div class="stat"><span class="k">최대 침수심</span><span class="v ok" id="sFloodD">0.0</span></div>
+    </div>
+
+    <div class="card" style="display:flex;flex-direction:column;gap:6px">
+      <h2>강우주상도 / 방류 수문곡선</h2>
+      <canvas id="hyeto" class="mini"></canvas>
+      <canvas id="hydro" class="mini"></canvas>
+    </div>
+
+    <div class="card foot">
+      <b>구현 노트.</b> 실제 강남구 지형을 단순화: <b>강남역 저지대 분지</b>로 물이
+      모여 <b>한강(북)·탄천(동)</b>으로 배수되는 약 100개 노드의 수지상(樹枝狀)
+      우수관망을 절차적으로 생성했습니다. 각 노드·관거는 SWMM 동역학파 절차
+      (연속방정식 <code>dy=dV/A</code> + Manning 흐름 + 과부하 월류)로 매 스텝 계산됩니다.
+      집중호우 이상에서 <b>강남역 일대가 가장 먼저·심하게 침수</b>합니다.
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   서울 강남구 우수관망 침수 시뮬레이터
+   - 지형: 강남역 분지(저지대) + 남측 구릉, 한강(북)/탄천(동) 방류
+   - 관망: ~100노드 절차 생성, 방류구 기준 BFS로 수지상 트리 구성,
+           관저(invert)는 하류→상류 최소경사로 등급화하여 항상 자연유하
+   - 물리: src/solver/dynwave.c 의 동역학파 라우팅을 그대로 구현
+   ========================================================================= */
+
+// ---------------- 설정 ----------------
+const GX=12, GY=9;            // 격자(동×남) → 108 노드
+const CELL=165;              // 격자 간격(m)
+const SLOPE=0.0032;          // 관거 최소 설계경사
+const NOMINAL=[0.3,0.4,0.5,0.6,0.8,1.0,1.2,1.5,1.8,2.0,2.4,3.0,3.5]; // 표준 관경/암거(m)
+// 방류구 격자위치 (i=동, j=남). 한강=북(j=0), 탄천=동(i=GX-1)
+const OUTFALLS=[[3,0],[7,0],[10,0],[GX-1,2],[GX-1,5]];
+// 지형 랜드마크(정규좌표) — 시각 컨텍스트용
+const MARKS=[
+  {n:'강남역', x:0.27, y:0.58, key:true},
+  {n:'역삼역', x:0.44, y:0.46},
+  {n:'선릉역', x:0.58, y:0.40},
+  {n:'삼성역', x:0.74, y:0.36},
+];
+
+// 결정적 해시 지터 (Math.random 미사용)
+function hash(n){ const s=Math.sin(n*127.1+311.7)*43758.5453; return s-Math.floor(s); }
+
+// ---------------- 지형(합성 DEM) ----------------
+// gx:0(서)~1(동,탄천)  gy:0(북,한강)~1(남,구릉)
+function ground(gx,gy){
+  let e = 12;
+  e += 23*gy;                       // 남쪽으로 상승(구릉)
+  e += 7*(1-gx)*(0.6+0.4*gy);       // 서측이 동측(탄천)보다 높음
+  e += 9*Math.pow(Math.max(0,gy-0.62)/0.38,1.6); // 남측 능선
+  // 강남역 분지(저지대)
+  const bx=0.27,by=0.58;
+  e -= 16*Math.exp(-(((gx-bx)**2)/0.020 + ((gy-by)**2)/0.034));
+  // 분지→탄천 배수 골짜기(완만한 저지 띠)
+  e -= 4*Math.exp(-(((gy-0.42)**2)/0.05))*gx;
+  return e;
+}
+
+// ---------------- 관망 절차 생성 ----------------
+let NODES={}, LINKS=[], NODE_LIST=[];
+function gid(i,j){ return 'N'+i+'_'+j; }
+function inGrid(i,j){ return i>=0&&i<GX&&j>=0&&j<GY; }
+
+function buildNetwork(){
+  NODES={}; LINKS=[]; NODE_LIST=[];
+  const outSet=new Set(OUTFALLS.map(o=>o[0]+','+o[1]));
+  // 1) 노드 생성
+  for(let j=0;j<GY;j++) for(let i=0;i<GX;i++){
+    const gx=i/(GX-1), gy=j/(GY-1);
+    const jx=(hash(i*7+j*13)-0.5)*0.6, jy=(hash(i*17+j*5)-0.5)*0.6; // 지터(격자칸 단위)
+    const isOut=outSet.has(i+','+j);
+    const nd={ id:gid(i,j), i, j,
+      xm:(i+jx)*CELL, ym:(j+jy)*CELL,         // 평면 좌표(m)
+      nx:gx, ny:gy,                            // 정규좌표(렌더)
+      ground:ground(gx,gy), outfall:isOut };
+    NODES[nd.id]=nd; NODE_LIST.push(nd);
+  }
+  // 2) 방류구 기준 다중소스 BFS 거리
+  const dist={}; const q=[];
+  for(const [i,j] of OUTFALLS){ const id=gid(i,j); dist[id]=0; q.push(id); }
+  const nbrs=(nd)=>[[1,0],[-1,0],[0,1],[0,-1]].map(([di,dj])=>[nd.i+di,nd.j+dj])
+                     .filter(([i,j])=>inGrid(i,j)).map(([i,j])=>NODES[gid(i,j)]);
+  for(let h=0;h<q.length;h++){ const cur=NODES[q[h]];
+    for(const nb of nbrs(cur)) if(dist[nb.id]===undefined){ dist[nb.id]=dist[cur.id]+1; q.push(nb.id); } }
+  // 3) 하류 포인터: 거리 더 작은 이웃 중 지반 최저 (자연 배수 방향)
+  for(const nd of NODE_LIST){ nd.dist=dist[nd.id]; nd.down=null; nd.up=[]; }
+  for(const nd of NODE_LIST){
+    if(nd.outfall) continue;
+    let best=null;
+    for(const nb of nbrs(nd)){
+      if(dist[nb.id] < dist[nd.id]){
+        if(!best || nb.ground < best.ground) best=nb;
+      }
+    }
+    nd.down=best; if(best) best.up.push(nd);
+  }
+  // 4) 관거 길이 + 상류 노드수(누가) 집계 → 관경 산정
+  const order=[...NODE_LIST].sort((a,b)=>b.dist-a.dist); // 상류→하류
+  for(const nd of NODE_LIST) nd.acc=1;
+  for(const nd of order){ if(nd.down) nd.down.acc+=nd.acc; }
+  // 5) 관저(invert) 등급화: 하류→상류, 최소경사 보장
+  const orderDn=[...NODE_LIST].sort((a,b)=>a.dist-b.dist); // 하류(방류구)→상류
+  for(const nd of orderDn){
+    if(nd.outfall){ nd.invert = nd.ground - 4.0; continue; }
+    const d=nd.down;
+    const len=Math.hypot(nd.xm-d.xm, nd.ym-d.ym);
+    nd._len=len;
+    nd.invert = d.invert + SLOPE*len;
+  }
+  // 6) 링크 생성 + 관경/소유역 부여
+  for(const nd of NODE_LIST){
+    if(nd.outfall) continue;
+    const d=nd.down, len=nd._len;
+    // 관경: 누가 노드수(≈배수면적)에 비례 (간선은 대형 암거)
+    let D=0.35+0.27*Math.sqrt(nd.acc);
+    D=NOMINAL.reduce((p,c)=>Math.abs(c-D)<Math.abs(p-D)?c:p, NOMINAL[0]);
+    LINKS.push({f:nd.id,t:d.id, D, L:len, n:0.013, q:0, fill:0});
+    // 노드 침수(지표까지 깊이): 매설심 클램프
+    nd.full=Math.max(1.5, Math.min(6.0, nd.ground-nd.invert));
+    // 맨홀/지표 저류 평면적: 저지대일수록 넓게(가로침수 모사)
+    nd.area=60 + 90*Math.max(0,(20-nd.ground))/20 + 0.6*nd.acc;
+    // 소유역: 격자칸 면적 × 도시 불투수
+    nd.sub={ area:CELL*CELL*1.15, imp:0.74+0.06*hash(nd.i*3+nd.j), storage:0 };
+  }
+  for(const nd of NODE_LIST){ if(nd.outfall){ nd.full=99; nd.area=300; } }
+  document.getElementById('nN').textContent=NODE_LIST.length;
+}
+
+// ---------------- 상태/물리 (dynwave.c 기반) ----------------
+let S;
+function initState(){
+  S={t:0, rain:+rain.value, flooded:{}, totalFloodVol:0, maxFloodDepth:0,
+     lastOut:0, hyeto:[], hydro:[], inflow:0, store:0, floodN:0, _lastSample:0};
+  for(const nd of NODE_LIST){
+    nd.depth=0; nd.head=nd.invert; nd.inflow=0; nd.outflow=0; nd.oldNet=0;
+    nd.lateral=0; nd.flood=0; if(nd.sub) nd.sub.storage=0;
+  }
+  for(const L of LINKS){ L.q=0; L.fill=0; }
+}
+function pipeGeom(y,D){
+  if(y<=0) return {A:0,R:0};
+  if(y>=D){ const A=Math.PI*D*D/4; return {A,R:D/4}; }
+  const th=2*Math.acos(1-2*y/D);
+  const A=(D*D/8)*(th-Math.sin(th)), P=D*th/2;
+  return {A, R:A/Math.max(P,1e-6)};
+}
+const INFILT=4/3600/1000, K_LAG=360;
+function runoff(nd,dt){
+  if(!nd.sub) return 0;
+  const i=S.rain/3600/1000;
+  const ieff=Math.max(0,i-INFILT)*nd.sub.imp;
+  const supply=ieff*nd.sub.area;
+  const out=nd.sub.storage/K_LAG;
+  nd.sub.storage+=(supply-out)*dt; if(nd.sub.storage<0)nd.sub.storage=0;
+  return out;
+}
+const OMEGA=0.55, ITERS=4;
+function step(dt){
+  for(const nd of NODE_LIST) nd.lateral=runoff(nd,dt);
+  for(let it=0; it<ITERS; it++){
+    for(const L of LINKS){
+      const u=NODES[L.f], d=NODES[L.t];
+      const hu=u.invert+u.depth, hd=d.invert+d.depth;
+      const Sf=(hu-hd)/L.L;
+      const yU=Math.min(u.depth,L.D), yD=Math.min(d.depth,L.D);
+      const g=pipeGeom(Math.max((yU+yD)/2,0),L.D);
+      let q=0;
+      if(g.A>1e-5 && Sf!==0)
+        q=Math.sign(Sf)*(1/L.n)*g.A*Math.pow(g.R,2/3)*Math.sqrt(Math.abs(Sf));
+      const src=q>=0?u:d;
+      const avail=src.depth*src.area/dt + src.lateral + 1e-9;
+      if(Math.abs(q)>Math.abs(avail)) q=Math.sign(q)*Math.abs(avail);
+      L.q=(1-OMEGA)*L.q+OMEGA*q;
+    }
+  }
+  for(const nd of NODE_LIST){ nd.inflow=nd.lateral; nd.outflow=0; }
+  for(const L of LINKS){ const u=NODES[L.f], d=NODES[L.t];
+    if(L.q>=0){ u.outflow+=L.q; d.inflow+=L.q; } else { d.outflow+=-L.q; u.inflow+=-L.q; } }
+  let floodN=0, sumOut=0; S.inflow=0; S.store=0; let maxFD=0;
+  for(const nd of NODE_LIST){
+    if(nd.sub) S.inflow+=nd.lateral;
+    if(nd.outfall){ sumOut+=nd.inflow; nd.depth=0; continue; }
+    const dQ=nd.inflow-nd.outflow;
+    const dV=0.5*(nd.oldNet+dQ)*dt; nd.oldNet=dQ;
+    nd.depth+=dV/nd.area; nd.flood=0;
+    if(nd.depth>nd.full){
+      const over=(nd.depth-nd.full)*nd.area;
+      nd.flood=over/dt; S.totalFloodVol+=over; nd.depth=nd.full;
+      floodN++; S.flooded[nd.id]=1;
+    }
+    if(nd.depth<0) nd.depth=0;
+    S.store+=nd.depth*nd.area;
+    // 침수심 추정: 월류 누적을 지표 저류로 환산(시각/지표용)
+    nd.surf = nd.flood>0 ? Math.min(2.5,(nd.surf||0)+nd.flood*dt/nd.area*0.5) : Math.max(0,(nd.surf||0)-0.0005*dt);
+    if(nd.surf>maxFD) maxFD=nd.surf;
+  }
+  S.floodN=floodN; S.lastOut=sumOut; S.maxFloodDepth=maxFD;
+  S.hydro.push(sumOut); if(S.hydro.length>140)S.hydro.shift();
+  S.t+=dt;
+}
+
+// ---------------- 렌더 ----------------
+const cv=document.getElementById('net'), cx=cv.getContext('2d');
+function fit(c){ const r=c.getBoundingClientRect(), d=devicePixelRatio||1;
+  c.width=r.width*d; c.height=r.height*d; c.getContext('2d').setTransform(d,0,0,d,0,0);
+  return {w:r.width,h:r.height}; }
+let MARGIN=34;
+function P(nx,ny,w,h){ return {x:MARGIN+nx*(w-2*MARGIN), y:MARGIN+ny*(h-2*MARGIN)}; }
+const C_LOW=[43,108,255],C_MID=[255,180,84],C_HI=[255,84,112];
+function mix(a,b,t){return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')})`;}
+function fillCol(r){ return r<0.7?mix(C_LOW,C_MID,r/0.7):mix(C_MID,C_HI,(r-0.7)/0.3); }
+let running=false;
+
+function draw(){
+  const {w,h}=fit(cv); cx.clearRect(0,0,w,h);
+  // 배경
+  cx.fillStyle='#0a1322'; cx.fillRect(0,0,w,h);
+  // 한강(북) / 탄천(동)
+  cx.fillStyle='#15315c';
+  cx.fillRect(0,0,w,P(0,0,w,h).y-6);                       // 한강 띠(상단)
+  cx.fillRect(P(1,0,w,h).x+6,0,w,h);                       // 탄천 띠(우측)
+  cx.fillStyle='#9fc4ff'; cx.font='12px sans-serif';
+  cx.textAlign='left';  cx.fillText('한강 (Han R.)', 12, 16);
+  cx.save(); cx.translate(w-12,h-14); cx.rotate(-Math.PI/2);
+  cx.fillText('탄천 (Tancheon)',0,0); cx.restore();
+  // 거리 음영(저지대=어두운 청록)
+  for(const nd of NODE_LIST){ if(nd.outfall)continue;
+    const p=P(nd.nx,nd.ny,w,h);
+    const low=Math.max(0,(24-nd.ground))/24;
+    if(low>0.05){ cx.fillStyle=`rgba(46,86,120,${0.10+0.22*low})`;
+      cx.beginPath(); cx.arc(p.x,p.y,CELL*0.0011*(w)/1+18,0,7); cx.fill(); }
+  }
+  // 도로 힌트(테헤란로/강남대로)
+  cx.strokeStyle='rgba(150,180,220,.12)'; cx.lineWidth=8;
+  let a=P(0.20,0.60,w,h), b=P(0.80,0.34,w,h);
+  cx.beginPath();cx.moveTo(a.x,a.y);cx.lineTo(b.x,b.y);cx.stroke(); // 테헤란로
+  a=P(0.27,0.02,w,h); b=P(0.27,0.98,w,h);
+  cx.beginPath();cx.moveTo(a.x,a.y);cx.lineTo(b.x,b.y);cx.stroke(); // 강남대로
+
+  // 관거
+  for(const L of LINKS){
+    const u=P(NODES[L.f].nx,NODES[L.f].ny,w,h), d=P(NODES[L.t].nx,NODES[L.t].ny,w,h);
+    const g=pipeGeom(Math.min((NODES[L.f].depth+NODES[L.t].depth)/2,L.D),L.D);
+    const full=g.A/(Math.PI*L.D*L.D/4); L.fill=full;
+    cx.strokeStyle='#0a1322'; cx.lineWidth=2.2+L.D*3.2; cx.lineCap='round';
+    cx.beginPath();cx.moveTo(u.x,u.y);cx.lineTo(d.x,d.y);cx.stroke();
+    cx.strokeStyle=fillCol(full); cx.lineWidth=1+L.D*2.6;
+    cx.beginPath();cx.moveTo(u.x,u.y);cx.lineTo(d.x,d.y);cx.stroke();
+    if(running && Math.abs(L.q)>0.02){
+      const t=((S.t*0.5)%1), dir=L.q>=0?t:1-t;
+      cx.fillStyle='rgba(255,255,255,.7)';
+      cx.beginPath();cx.arc(u.x+(d.x-u.x)*dir,u.y+(d.y-u.y)*dir,1.8,0,7);cx.fill();
+    }
+  }
+  // 노드
+  for(const nd of NODE_LIST){
+    const p=P(nd.nx,nd.ny,w,h);
+    if(nd.outfall){
+      cx.fillStyle='#6ee7b7'; cx.beginPath();cx.arc(p.x,p.y,5,0,7);cx.fill();
+      cx.strokeStyle='#0a1322';cx.lineWidth=1.5;cx.stroke(); continue;
+    }
+    const ratio=Math.min(1,nd.depth/nd.full), R=4.2;
+    // 지표 침수 웅덩이
+    if((nd.surf||0)>0.02){
+      const rr=8+22*Math.min(1,nd.surf/2.0);
+      cx.fillStyle=`rgba(255,84,112,${0.10+0.16*Math.min(1,nd.surf)})`;
+      cx.beginPath();cx.arc(p.x,p.y,rr,0,7);cx.fill();
+    }
+    cx.fillStyle=ratio<0.05?'#1b2c47':fillCol(ratio);
+    cx.beginPath();cx.arc(p.x,p.y,R,0,7);cx.fill();
+    if(nd.flood>0.01){
+      const pulse=0.5+0.5*Math.sin(S.t*6);
+      cx.strokeStyle=`rgba(255,84,112,${0.6+0.4*pulse})`;cx.lineWidth=2;
+      cx.beginPath();cx.arc(p.x,p.y,R+3+3*pulse,0,7);cx.stroke();
+    }
+  }
+  // 랜드마크
+  for(const m of MARKS){ const p=P(m.x,m.y,w,h);
+    cx.fillStyle=m.key?'#ffd479':'#cfe0f8';
+    cx.beginPath();cx.arc(p.x,p.y,m.key?4:2.6,0,7);cx.fill();
+    cx.font=(m.key?'bold 12px':'11px')+' sans-serif'; cx.textAlign='left';
+    cx.fillStyle=m.key?'#ffe7b3':'#aebfe0';
+    cx.fillText(m.n,p.x+7,p.y+4);
+  }
+  // 강우 입자
+  if(S.rain>0 && running){
+    const drops=Math.round(S.rain/5);
+    cx.strokeStyle='rgba(120,180,255,.30)';cx.lineWidth=1;
+    for(let k=0;k<drops;k++){
+      const rx=(k*97.13+S.t*120*(0.5+S.rain/360))%w;
+      const ry=((k*53.7+S.t*420*(0.5+S.rain/360))%h);
+      cx.beginPath();cx.moveTo(rx,ry);cx.lineTo(rx-2,ry+8);cx.stroke();
+    }
+  }
+}
+function miniChart(id,data,color,label,max){
+  const c=document.getElementById(id),x=c.getContext('2d');
+  const {w,h}=fit(c);x.clearRect(0,0,w,h);
+  const mx=Math.max(max,...data,0.001),n=data.length,step=w/Math.max(n-1,1);
+  x.strokeStyle=color;x.lineWidth=2;x.beginPath();
+  for(let i=0;i<n;i++){const px=i*step,py=h-4-(data[i]/mx)*(h-12);i?x.lineTo(px,py):x.moveTo(px,py);}
+  x.stroke();
+  if(n>1){x.fillStyle=color+'22';x.lineTo((n-1)*step,h);x.lineTo(0,h);x.closePath();x.fill();}
+  x.fillStyle='#8fa6c4';x.font='10px sans-serif';x.textAlign='left';x.fillText(label,6,12);
+}
+
+// ---------------- 루프/HUD ----------------
+let raf=null,lastT=0;
+function loop(ts){
+  if(!running)return;
+  const dtReal=Math.min(0.05,(ts-lastT)/1000||0.016);lastT=ts;
+  const speed=+document.getElementById('speed').value;
+  let simAdvance=dtReal*speed*30, dt=2; S.rain=+rain.value;
+  for(let acc=0;acc<simAdvance;acc+=dt) step(dt);
+  if(S.t-(S._lastSample||0)>20){ S._lastSample=S.t; S.hyeto.push(S.rain); if(S.hyeto.length>140)S.hyeto.shift(); }
+  draw();updateHUD();
+  raf=requestAnimationFrame(loop);
+}
+function updateHUD(){
+  const set=(id,v)=>document.getElementById(id).textContent=v;
+  set('sInflow',S.inflow.toFixed(1)+' m³/s');
+  set('sOut',S.lastOut.toFixed(1)+' m³/s');
+  set('sStore',(S.store).toFixed(0)+' m³');
+  const fn=document.getElementById('sFloodN'),fv=document.getElementById('sFloodV'),fd=document.getElementById('sFloodD');
+  fn.textContent=(S.floodN||0)+' 개'; fv.textContent=S.totalFloodVol.toFixed(0)+' m³';
+  fd.textContent=S.maxFloodDepth.toFixed(2)+' m';
+  fn.className='v '+(S.floodN>0?'flood':'ok');
+  fv.className='v '+(S.totalFloodVol>1?'flood':'ok');
+  fd.className='v '+(S.maxFloodDepth>0.05?'flood':'ok');
+  const sec=Math.floor(S.t);
+  document.getElementById('clock').textContent=
+    `${String(Math.floor(sec/3600)).padStart(2,'0')}:`+
+    `${String(Math.floor(sec/60)%60).padStart(2,'0')}:`+
+    `${String(sec%60).padStart(2,'0')}`;
+  miniChart('hyeto',S.hyeto,'#37c0ff','강우 (mm/h)',180);
+  miniChart('hydro',S.hydro,'#6ee7b7','하천 방류 (m³/s)',Math.max(20,...S.hydro));
+}
+
+// ---------------- UI ----------------
+const rain=document.getElementById('rain');
+rain.oninput=()=>document.getElementById('rainV').textContent=rain.value;
+document.getElementById('speed').oninput=e=>document.getElementById('speedV').textContent=e.target.value;
+document.querySelectorAll('.presets button').forEach(b=>b.onclick=()=>{
+  rain.value=b.dataset.rain; document.getElementById('rainV').textContent=b.dataset.rain;});
+const playBtn=document.getElementById('play');
+playBtn.onclick=()=>{ running=!running; playBtn.textContent=running?'⏸ 일시정지':'▶ 시작';
+  playBtn.classList.toggle('primary',!running);
+  if(running){lastT=performance.now();raf=requestAnimationFrame(loop);} };
+document.getElementById('reset').onclick=()=>{
+  running=false; if(raf)cancelAnimationFrame(raf);
+  playBtn.textContent='▶ 시작'; playBtn.classList.add('primary');
+  initState(); draw(); updateHUD(); };
+
+buildNetwork(); initState(); draw(); updateHUD();
+window.addEventListener('resize',()=>{draw();updateHUD();});
+</script>
+</body>
+</html>
