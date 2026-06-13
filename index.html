@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWMM Web Demo · 도시 우수관망 침수 시뮬레이터</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121c2e; --panel2:#0e1626; --line:#23344e;
+    --text:#e6eefb; --muted:#8fa6c4; --accent:#37c0ff; --accent2:#6ee7b7;
+    --warn:#ffb454; --flood:#ff5470;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%, #16233b 0%, var(--bg) 55%);
+    color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",
+    "Apple SD Gothic Neo","Malgun Gothic",sans-serif; overflow:hidden;
+  }
+  .wrap{display:flex; height:100vh; gap:14px; padding:14px}
+  .left{flex:1; display:flex; flex-direction:column; gap:12px; min-width:0}
+  .right{width:340px; display:flex; flex-direction:column; gap:12px}
+  .card{background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);
+    border:1px solid var(--line); border-radius:14px; padding:14px}
+  h1{font-size:18px; margin:0; letter-spacing:.2px}
+  h1 small{display:block; font-size:12px; color:var(--muted); font-weight:400; margin-top:3px}
+  h2{font-size:12px; text-transform:uppercase; letter-spacing:1.4px;
+    color:var(--muted); margin:0 0 10px}
+  #stage{flex:1; position:relative; padding:0; overflow:hidden}
+  canvas{display:block; width:100%; height:100%; border-radius:13px}
+  .row{display:flex; align-items:center; gap:10px; margin:9px 0}
+  .row label{font-size:12px; color:var(--muted); width:96px; flex:none}
+  input[type=range]{flex:1; accent-color:var(--accent)}
+  .val{font-variant-numeric:tabular-nums; font-size:13px; min-width:62px; text-align:right}
+  .btns{display:flex; gap:8px; flex-wrap:wrap}
+  button{cursor:pointer; border:1px solid var(--line); background:#15233a; color:var(--text);
+    padding:9px 12px; border-radius:10px; font-size:13px; transition:.12s; flex:1}
+  button:hover{border-color:var(--accent); background:#1b2c47}
+  button.primary{background:linear-gradient(180deg,#1f6feb,#1657c0); border-color:#2f7bf0}
+  button.primary:hover{filter:brightness(1.12)}
+  button.warn{background:linear-gradient(180deg,#b5471f,#8f3414); border-color:#cf5a2c}
+  .presets button{flex:none; padding:7px 10px; font-size:12px}
+  .stat{display:flex; justify-content:space-between; align-items:baseline;
+    padding:7px 0; border-bottom:1px dashed var(--line)}
+  .stat:last-child{border-bottom:none}
+  .stat .k{font-size:12px; color:var(--muted)}
+  .stat .v{font-size:16px; font-variant-numeric:tabular-nums; font-weight:600}
+  .v.flood{color:var(--flood)} .v.ok{color:var(--accent2)}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--muted)}
+  .legend i{display:inline-block; width:11px; height:11px; border-radius:3px;
+    margin-right:5px; vertical-align:-1px}
+  .charts{display:flex; flex-direction:column; gap:6px}
+  canvas.mini{height:74px; border:1px solid var(--line); border-radius:8px; background:#0a1322}
+  .foot{font-size:11px; color:var(--muted); line-height:1.5}
+  .badge{display:inline-block; font-size:10px; padding:2px 7px; border-radius:20px;
+    background:#13314a; color:var(--accent); border:1px solid #1d4a6b; margin-left:6px}
+  .pill{font-size:11px; color:var(--accent2); background:#0e2a22; border:1px solid #1c4a3a;
+    border-radius:20px; padding:3px 9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- LEFT : visualization -->
+  <div class="left">
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between">
+      <h1>도시 우수관망 침수 시뮬레이터
+        <small>EPA SWMM 동역학파(dynamic-wave) 알고리즘 · 브라우저 실시간 구현</small>
+      </h1>
+      <span id="clock" class="pill">00:00:00</span>
+    </div>
+    <div class="card" id="stage"><canvas id="net"></canvas></div>
+    <div class="card legend">
+      <span><i style="background:#2b6cff"></i>관거 수위(여유)</span>
+      <span><i style="background:#ffb454"></i>만관 임박</span>
+      <span><i style="background:#ff5470"></i>과부하·월류(침수)</span>
+      <span><i style="background:#6ee7b7"></i>소유역 유출</span>
+      <span><i style="background:#9bb4d6"></i>맨홀/노드</span>
+    </div>
+  </div>
+
+  <!-- RIGHT : controls + stats -->
+  <div class="right">
+    <div class="card">
+      <h2>강우 입력 (Rainfall)</h2>
+      <div class="row">
+        <label>강우강도</label>
+        <input id="rain" type="range" min="0" max="180" value="60" step="5">
+        <span class="val"><span id="rainV">60</span> mm/h</span>
+      </div>
+      <div class="presets btns">
+        <button data-rain="30">약한 비 30</button>
+        <button data-rain="70">호우 70</button>
+        <button data-rain="110">집중호우 110</button>
+        <button data-rain="160">극한강우 160</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label>재생 속도</label>
+        <input id="speed" type="range" min="1" max="20" value="8" step="1">
+        <span class="val"><span id="speedV">8</span>×</span>
+      </div>
+      <div class="btns" style="margin-top:6px">
+        <button id="play" class="primary">▶ 시작</button>
+        <button id="reset" class="warn">⟲ 초기화</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>시스템 상태 (Live)</h2>
+      <div class="stat"><span class="k">총 유입 (소유역 유출)</span><span class="v" id="sInflow">0.0</span></div>
+      <div class="stat"><span class="k">방류구 유출량</span><span class="v" id="sOut">0.0</span></div>
+      <div class="stat"><span class="k">관망 내 저류량</span><span class="v" id="sStore">0.0</span></div>
+      <div class="stat"><span class="k">침수(월류) 노드</span><span class="v ok" id="sFloodN">0 개</span></div>
+      <div class="stat"><span class="k">누적 침수량</span><span class="v ok" id="sFloodV">0.0</span></div>
+    </div>
+
+    <div class="card charts">
+      <h2>강우주상도 / 방류 수문곡선</h2>
+      <canvas id="hyeto" class="mini"></canvas>
+      <canvas id="hydro" class="mini"></canvas>
+    </div>
+
+    <div class="card foot">
+      <b>구현 노트.</b> 소유역 유출(선형저수지) → 노드 연속방정식
+      <code>dy = dV/A</code> → 관거 Manning·동역학파 흐름 →
+      과부하 시 월류, 의 SWMM 라우팅 절차를 그대로 따릅니다.
+      대규모(서울 전역)가 아닌 <b>시연용 소규모 배수분구</b> 1개(7노드)입니다.
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   도시 우수관망 침수 시뮬레이터 — EPA SWMM 동역학파 라우팅의 브라우저 구현
+   단위: SI (m, m^2, m^3/s, sec).  알고리즘 출처: src/solver/dynwave.c
+   - 노드 연속:  dV = 0.5*(Q_old + Q_new)*dt,  dy = dV/A   (setNodeDepth)
+   - 관거 흐름:  Manning + HGL 마찰경사,  under-relaxation Omega (dwflow)
+   - 과부하:     수위 > 관정(crown) → surcharge,  > 지표 → 월류(flood)
+   ========================================================================= */
+
+// ---------- 관망 정의 (소규모 배수분구: 7 노드, 상류→하류 트리) ----------
+// invert = 관저 표고(m), full = 지표까지 깊이(m), area = 맨홀/노드 평면적(m^2)
+// 관경·경사는 실제 도시 우수관 설계(약 0.4% 경사, 10~30년 빈도 설계)를 모사 —
+// 평상시·약한 비는 여유, 집중호우 이상에서 관거 만관→과부하→지표 월류가 발생.
+const NODES = {
+  J1:{x:0.13,y:0.16, invert:22.00, full:3.0, area:50,  sub:{area:38000,imp:0.75}},
+  J2:{x:0.50,y:0.12, invert:22.00, full:3.0, area:50,  sub:{area:42000,imp:0.80}},
+  J3:{x:0.86,y:0.18, invert:21.90, full:3.0, area:50,  sub:{area:35000,imp:0.70}},
+  J4:{x:0.26,y:0.45, invert:21.40, full:3.2, area:80,  sub:{area:30000,imp:0.78}},
+  J5:{x:0.70,y:0.46, invert:21.30, full:3.2, area:80,  sub:{area:46000,imp:0.82}},
+  J6:{x:0.48,y:0.72, invert:20.55, full:3.5, area:120, sub:{area:25000,imp:0.85}},
+  OUT:{x:0.48,y:0.93, invert:19.95, full:6.0, area:200, outfall:true}
+};
+// 관거: from→to, 지름 D(m), 길이 L(m), Manning n
+const LINKS = [
+  {f:'J1',t:'J4', D:0.8, L:140, n:0.013},
+  {f:'J2',t:'J5', D:0.8, L:150, n:0.013},
+  {f:'J3',t:'J5', D:0.8, L:150, n:0.013},
+  {f:'J4',t:'J6', D:1.0, L:170, n:0.013},
+  {f:'J5',t:'J6', D:1.1, L:170, n:0.013},
+  {f:'J6',t:'OUT',D:1.2, L:130, n:0.013},
+];
+
+// ---------- 상태 ----------
+let S; // 시뮬레이션 상태 객체
+function initState(){
+  S = {t:0, rain:+rain.value, flooded:{}, totalFloodVol:0,
+       lastOut:0, hyeto:[], hydro:[], inflow:0, store:0};
+  for(const id in NODES){
+    const nd = NODES[id];
+    nd.depth = 0;           // 수심(m)
+    nd.head  = nd.invert;   // 수두(m)
+    nd.inflow = 0; nd.outflow = 0; nd.oldNet = 0;
+    nd.lateral = 0;         // 소유역 유출 유입(m^3/s)
+    nd.flood = 0;           // 현재 월류율(m^3/s)
+    nd.crown = nd.invert + nd.full*0.0; // (단순화: 관정=invert+가장 큰 연결관 지름)
+    if(nd.sub){ nd.sub.storage = 0; } // 선형저수지 저류(m^3)
+  }
+  // 관정 표고 = invert + 연결 관거 최대 지름
+  for(const L of LINKS){
+    NODES[L.f].crown = Math.max(NODES[L.f].crown, NODES[L.f].invert + L.D);
+    NODES[L.t].crown = Math.max(NODES[L.t].crown, NODES[L.t].invert + L.D);
+  }
+  for(const L of LINKS){ L.q = 0; L.fill = 0; }
+}
+
+// ---------- 원형관 부분류 단면 기하 ----------
+function pipeGeom(y, D){
+  if(y<=0) return {A:0,R:0,T:0};
+  if(y>=D){ const A=Math.PI*D*D/4; return {A, R:D/4, T:0.001}; } // 만관
+  const th = 2*Math.acos(1 - 2*y/D);         // 중심각
+  const A  = (D*D/8)*(th - Math.sin(th));
+  const P  = D*th/2;
+  const T  = D*Math.sin(th/2);
+  return {A, R:A/Math.max(P,1e-6), T};
+}
+
+// ---------- 소유역 유출 (SWMM 비선형저수지를 선형저수지로 단순화) ----------
+const INFILT = 4/3600/1000;      // 침투/손실 ~4 mm/h → m/s
+const K_LAG  = 360;              // 유역 응답 지연(s)
+function runoff(nd, dt){
+  if(!nd.sub) return 0;
+  const i = S.rain/3600/1000;                  // mm/h → m/s
+  const ieff = Math.max(0, i - INFILT) * nd.sub.imp; // 유효강우 (불투수율 반영)
+  const supply = ieff * nd.sub.area;           // m^3/s 공급
+  const out = nd.sub.storage / K_LAG;          // 선형저수지 유출
+  nd.sub.storage += (supply - out)*dt;
+  if(nd.sub.storage<0) nd.sub.storage=0;
+  return out;
+}
+
+// ---------- 한 시간스텝 라우팅 (SWMM 반복 동역학파) ----------
+const OMEGA = 0.55, ITERS = 4, GRAV = 9.81;
+function step(dt){
+  // 1) 소유역 유출 → 각 노드 측방 유입
+  for(const id in NODES){ const nd=NODES[id]; nd.lateral = runoff(nd, dt); }
+
+  // 2) 관거 흐름 — 반복(under-relaxation)으로 수렴
+  for(let it=0; it<ITERS; it++){
+    for(const L of LINKS){
+      const u=NODES[L.f], d=NODES[L.t];
+      const hu=u.invert+u.depth, hd=d.invert+d.depth;
+      const Sf=(hu-hd)/L.L;                       // HGL 마찰경사
+      // 흐름 단면: 상·하류 평균 수심을 관 기준으로
+      const yU=Math.min(u.depth, L.D), yD=Math.min(d.depth, L.D);
+      const g=pipeGeom(Math.max((yU+yD)/2, 0), L.D);
+      let q=0;
+      if(g.A>1e-5 && Sf!==0){
+        // Manning 정상류 + 동역학파 마찰경사 부호
+        q = Math.sign(Sf)*(1/L.n)*g.A*Math.pow(g.R,2/3)*Math.sqrt(Math.abs(Sf));
+      }
+      // 상류 가용수량으로 제한 (역류 시 하류 기준)
+      const src = q>=0?u:d;
+      const avail = src.depth*src.area/dt + src.lateral + 1e-9;
+      if(Math.abs(q)>Math.abs(avail)) q=Math.sign(q)*Math.abs(avail);
+      L.q = (1-OMEGA)*L.q + OMEGA*q;              // under-relaxation
+    }
+  }
+
+  // 3) 노드 유입/유출 집계
+  for(const id in NODES){ const nd=NODES[id]; nd.inflow=nd.lateral; nd.outflow=0; }
+  for(const L of LINKS){
+    const u=NODES[L.f], d=NODES[L.t];
+    if(L.q>=0){ u.outflow+=L.q; d.inflow+=L.q; }
+    else      { d.outflow+=-L.q; u.inflow+=-L.q; }
+  }
+
+  // 4) 노드 연속방정식 → 수심 갱신 + 월류
+  let floodN=0;
+  S.inflow=0; S.store=0;
+  for(const id in NODES){
+    const nd=NODES[id];
+    if(nd.sub) S.inflow += nd.lateral;
+    if(nd.outfall){                              // 방류구: 자유 방류
+      S.lastOut = nd.inflow;
+      S.hydro.push(nd.inflow);
+      nd.depth = 0;                              // 자유 유출 가정
+      continue;
+    }
+    const dQ = nd.inflow - nd.outflow;
+    const dV = 0.5*(nd.oldNet + dQ)*dt;          // SWMM: 평균 순유입
+    nd.oldNet = dQ;
+    nd.depth += dV/nd.area;
+    nd.flood = 0;
+    const yMax = nd.full;                        // 지표까지 깊이
+    if(nd.depth > yMax){                          // 지표 초과 → 월류(침수)
+      const over = (nd.depth - yMax)*nd.area;    // 초과 체적
+      nd.flood = over/dt;
+      S.totalFloodVol += over;
+      nd.depth = yMax;
+      floodN++;
+      S.flooded[id]=1;
+    }
+    if(nd.depth<0) nd.depth=0;
+    S.store += nd.depth*nd.area;
+  }
+  S.floodN=floodN;
+  S.t += dt;
+}
+
+// ---------- 렌더링 ----------
+const cv=document.getElementById('net'), cx=cv.getContext('2d');
+function fit(c){ const r=c.getBoundingClientRect(), d=devicePixelRatio||1;
+  c.width=r.width*d; c.height=r.height*d; c.getContext('2d').setTransform(d,0,0,d,0,0);
+  return {w:r.width,h:r.height}; }
+function pos(nd,w,h){ return {x:24+nd.x*(w-48), y:24+nd.y*(h-48)}; }
+
+function lerpColor(a,b,t){ // a,b = [r,g,b]
+  return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')})`; }
+const C_LOW=[43,108,255], C_MID=[255,180,84], C_HI=[255,84,112];
+
+function draw(){
+  const {w,h}=fit(cv);
+  cx.clearRect(0,0,w,h);
+  // 배경 격자
+  cx.strokeStyle='#13203a'; cx.lineWidth=1;
+  for(let gx=0;gx<w;gx+=40){cx.beginPath();cx.moveTo(gx,0);cx.lineTo(gx,h);cx.stroke();}
+  for(let gy=0;gy<h;gy+=40){cx.beginPath();cx.moveTo(0,gy);cx.lineTo(w,gy);cx.stroke();}
+
+  // 소유역 (노드 주변 음영)
+  for(const id in NODES){ const nd=NODES[id]; if(!nd.sub) continue;
+    const p=pos(nd,w,h);
+    const wet=Math.min(1, nd.sub.storage/(nd.sub.area*0.01));
+    cx.fillStyle=`rgba(110,231,183,${0.05+0.16*wet})`;
+    cx.beginPath(); cx.arc(p.x,p.y,30,0,7); cx.fill();
+  }
+
+  // 관거
+  for(const L of LINKS){
+    const u=pos(NODES[L.f],w,h), d=pos(NODES[L.t],w,h);
+    const g=pipeGeom(Math.min((NODES[L.f].depth+NODES[L.t].depth)/2,L.D),L.D);
+    const full=g.A/(Math.PI*L.D*L.D/4);
+    L.fill=full;
+    let col = full<0.7 ? lerpColor(C_LOW,C_MID,full/0.7)
+                       : lerpColor(C_MID,C_HI,(full-0.7)/0.3);
+    cx.strokeStyle='#0a1322'; cx.lineWidth=10+L.D*5; cx.lineCap='round';
+    cx.beginPath();cx.moveTo(u.x,u.y);cx.lineTo(d.x,d.y);cx.stroke();
+    cx.strokeStyle=col; cx.lineWidth=4+L.D*4.2;
+    cx.beginPath();cx.moveTo(u.x,u.y);cx.lineTo(d.x,d.y);cx.stroke();
+    // 흐름 방향 입자
+    if(Math.abs(L.q)>0.001){
+      const t=((S.t*0.6/Math.max(L.L/60,1))%1);
+      const dir = L.q>=0?t:1-t;
+      const px=u.x+(d.x-u.x)*dir, py=u.y+(d.y-u.y)*dir;
+      cx.fillStyle='rgba(255,255,255,.85)';
+      cx.beginPath();cx.arc(px,py,2.6,0,7);cx.fill();
+    }
+  }
+
+  // 노드(맨홀)
+  for(const id in NODES){
+    const nd=NODES[id], p=pos(nd,w,h);
+    const R = nd.outfall?16:13;
+    const ratio = nd.outfall?0:Math.min(1, nd.depth/nd.full);
+    // 외곽
+    cx.fillStyle='#0a1322'; cx.beginPath();cx.arc(p.x,p.y,R+3,0,7);cx.fill();
+    cx.fillStyle='#1b2c47'; cx.beginPath();cx.arc(p.x,p.y,R,0,7);cx.fill();
+    // 수위 채움
+    let fill = nd.outfall ? '#37c0ff'
+             : ratio<0.7 ? lerpColor(C_LOW,C_MID,ratio/0.7)
+                         : lerpColor(C_MID,C_HI,(ratio-0.7)/0.3);
+    cx.save(); cx.beginPath();cx.arc(p.x,p.y,R,0,7);cx.clip();
+    cx.fillStyle=fill;
+    cx.fillRect(p.x-R, p.y+R-(2*R*ratio), 2*R, 2*R*ratio);
+    cx.restore();
+    // 월류 표시
+    if(nd.flood>0.002){
+      const pulse=0.5+0.5*Math.sin(S.t*6);
+      cx.strokeStyle=`rgba(255,84,112,${0.5+0.5*pulse})`; cx.lineWidth=3;
+      cx.beginPath();cx.arc(p.x,p.y,R+6+4*pulse,0,7);cx.stroke();
+      for(let k=0;k<6;k++){const a=k/6*7+S.t*3,rr=R+8+ (S.t*40%14);
+        cx.fillStyle='rgba(255,120,140,.8)';
+        cx.beginPath();cx.arc(p.x+Math.cos(a)*rr,p.y+Math.sin(a)*rr-6,2,0,7);cx.fill();}
+    }
+    cx.strokeStyle='#9bb4d6'; cx.lineWidth=1.5;
+    cx.beginPath();cx.arc(p.x,p.y,R,0,7);cx.stroke();
+    cx.fillStyle='#cfe0f8'; cx.font='11px sans-serif'; cx.textAlign='center';
+    cx.fillText(nd.outfall?'방류구':id, p.x, p.y+R+13);
+  }
+
+  // 강우 애니메이션
+  if(S.rain>0 && running){
+    const drops=Math.round(S.rain/6);
+    cx.strokeStyle='rgba(120,180,255,.35)'; cx.lineWidth=1;
+    for(let k=0;k<drops;k++){
+      const rx=(k*97.13 + S.t*120*(0.5+S.rain/360))%w;
+      const ry=((k*53.7 + S.t*420*(0.5+S.rain/360))%h);
+      cx.beginPath();cx.moveTo(rx,ry);cx.lineTo(rx-2,ry+8);cx.stroke();
+    }
+  }
+}
+
+// 미니 차트
+function miniChart(id,data,color,label,max){
+  const c=document.getElementById(id), x=c.getContext('2d');
+  const {w,h}=fit(c); x.clearRect(0,0,w,h);
+  const mx=Math.max(max, ...data, 0.001);
+  x.strokeStyle=color; x.lineWidth=2; x.beginPath();
+  const n=data.length, step=w/Math.max(n-1,1);
+  for(let i=0;i<n;i++){const px=i*step, py=h-4-(data[i]/mx)*(h-12);
+    i?x.lineTo(px,py):x.moveTo(px,py);} x.stroke();
+  x.fillStyle=color+'22';
+  if(n>1){x.lineTo((n-1)*step,h);x.lineTo(0,h);x.closePath();x.fill();}
+  x.fillStyle='#8fa6c4'; x.font='10px sans-serif'; x.textAlign='left';
+  x.fillText(label,6,12);
+}
+
+// ---------- 루프 ----------
+let running=false, raf=null, lastT=0;
+function loop(ts){
+  if(!running) return;
+  const dtReal=Math.min(0.05,(ts-lastT)/1000||0.016); lastT=ts;
+  const speed=+document.getElementById('speed').value;
+  // 시뮬 시간 진행: 화면 1초 ≈ speed*30 시뮬초, 내부 dt=2s 서브스텝
+  let simAdvance=dtReal*speed*30, dt=2;
+  S.rain=+rain.value;
+  for(let acc=0; acc<simAdvance; acc+=dt) step(dt);
+  // 차트 샘플링
+  if(S.hyeto.length===0 || S.t-(S._lastSample||0)>20){
+    S._lastSample=S.t; S.hyeto.push(S.rain);
+    if(S.hyeto.length>120)S.hyeto.shift();
+    if(S.hydro.length>120)S.hydro.splice(0,S.hydro.length-120);
+  }
+  draw(); updateHUD();
+  raf=requestAnimationFrame(loop);
+}
+
+function updateHUD(){
+  const set=(id,v)=>document.getElementById(id).textContent=v;
+  set('sInflow', S.inflow.toFixed(2)+' m³/s');
+  set('sOut', S.lastOut.toFixed(2)+' m³/s');
+  set('sStore', (S.store).toFixed(0)+' m³');
+  const fn=document.getElementById('sFloodN'), fv=document.getElementById('sFloodV');
+  fn.textContent=(S.floodN||0)+' 개'; fv.textContent=S.totalFloodVol.toFixed(0)+' m³';
+  fn.className='v '+((S.floodN>0)?'flood':'ok');
+  fv.className='v '+((S.totalFloodVol>1)?'flood':'ok');
+  const sec=Math.floor(S.t);
+  document.getElementById('clock').textContent=
+    `${String(Math.floor(sec/3600)).padStart(2,'0')}:`+
+    `${String(Math.floor(sec/60)%60).padStart(2,'0')}:`+
+    `${String(sec%60).padStart(2,'0')}`;
+  miniChart('hyeto',S.hyeto,'#37c0ff','강우 (mm/h)',180);
+  miniChart('hydro',S.hydro,'#6ee7b7','방류 (m³/s)',2);
+}
+
+// ---------- UI 바인딩 ----------
+const rain=document.getElementById('rain');
+rain.oninput=()=>document.getElementById('rainV').textContent=rain.value;
+document.getElementById('speed').oninput=e=>
+  document.getElementById('speedV').textContent=e.target.value;
+document.querySelectorAll('.presets button').forEach(b=>b.onclick=()=>{
+  rain.value=b.dataset.rain; document.getElementById('rainV').textContent=b.dataset.rain;});
+const playBtn=document.getElementById('play');
+playBtn.onclick=()=>{
+  running=!running;
+  playBtn.textContent=running?'⏸ 일시정지':'▶ 시작';
+  playBtn.classList.toggle('primary',!running);
+  if(running){ lastT=performance.now(); raf=requestAnimationFrame(loop); }
+};
+document.getElementById('reset').onclick=()=>{
+  running=false; if(raf)cancelAnimationFrame(raf);
+  playBtn.textContent='▶ 시작'; playBtn.classList.add('primary');
+  initState(); draw(); updateHUD();
+};
+
+// 시작
+initState(); draw(); updateHUD();
+window.addEventListener('resize',()=>{draw();updateHUD();});
+</script>
+</body>
+</html>
